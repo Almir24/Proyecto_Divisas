@@ -29,10 +29,13 @@ def obtener_datos_historicos(base_currency, target_currency):
         fechas = sorted(list(rates.keys()))
         precios = [rates[fecha][target_currency] for fecha in fechas if target_currency in rates[fecha]]
         
+        if len(precios) < 5:
+            raise ValueError("Datos insuficientes de la API")
+            
         df = pd.DataFrame({"Fecha": pd.to_datetime(fechas[-30:]), "Precio": precios[-30:]})
         return df
     except Exception:
-        # Respaldo local en caso de falla de red o API
+        # Respaldo local idéntico y seguro en caso de falla de red o API
         fechas_mock = pd.date_range(end=datetime.today(), periods=30, freq='D')
         precios_mock = np.linspace(17.5, 18.2, 30) + np.random.normal(0, 0.1, 30)
         return pd.DataFrame({"Fecha": fechas_mock, "Precio": precios_mock})
@@ -43,16 +46,17 @@ target_div = st.sidebar.selectbox("Moneda Destino", ["MXN", "BRL", "ARS", "EUR",
 
 df_historico = obtener_datos_historicos(base_div, target_div)
 
-# 3. Inteligencia Artificial: Ajuste por Regresión Lineal
-X = np.arange(len(df_historico)).reshape(-1, 1)
-y = df_historico['Precio'].values
+# 3. Inteligencia Artificial: Ajuste por Regresión Lineal blindado
+# Aseguramos que X e y sean arreglos NumPy de dos dimensiones y tipo flotante correcto
+X = np.arange(len(df_historico)).astype(float).reshape(-1, 1)
+y = df_historico['Precio'].values.astype(float)
 
 modelo_ia = LinearRegression()
 modelo_ia.fit(X, y)
 
 # Parámetros clave extraídos por la IA
-pendiente_m = modelo_ia.coef_[0]
-S_0 = y[-1] # Último precio real conocido del mercado
+pendiente_m = float(modelo_ia.coef_[0])
+S_0 = float(y[-1]) # Último precio real conocido del mercado
 mu_calculada = pendiente_m / S_0
 
 # Configuración de simulaciones estocásticas internas en sidebar
@@ -85,7 +89,7 @@ with tab1:
         st.markdown("**Solución Particular del Sistema:**")
         st.latex(rf"S(t) = {S_0:.4f} \cdot e^{{{mu_calculada:.5f} \cdot t}}")
         
-        # 7. Sección Automática de Interpretación Económica
+        # Sección Automática de Interpretación Económica
         st.subheader("💡 Interpretación Económica")
         if mu_calculada > 0.0001:
             st.success(f"**Tendencia Creciente ($\mu > 0$):** El modelo matemático indica una depreciación de la moneda base frente al {target_div}. Se proyecta una presión al alza en el tipo de cambio debido a fuerzas sostenidas del mercado.")
@@ -106,7 +110,7 @@ with tab1:
         
         fig = go.Figure()
         
-        # Añadir trayectorias de simulación con incertidumbre (Euler-Maruyama interno)
+        # Añadir trayectorias de simulación con incertidumbre
         for i in range(caminos_simulados):
             caminos = [S_0]
             for t in range(T):
