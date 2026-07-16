@@ -17,11 +17,11 @@ st.sidebar.header("⚙️ Configuración del Modelo")
 
 @st.cache_data(ttl=3600)
 def obtener_datos_historicos(base_currency, target_currency):
-    """Obtiene datos reales de los últimos 30 días usando una API pública."""
+    """Obtiene datos reales de los últimos 30 días usando una API pública (Frankfurter)."""
     end_date = datetime.today()
     start_date = end_date - timedelta(days=45) # Margen para asegurar 30 días hábiles
     
-    url = f"https://api.exchangerate.host/timeseries?start_date={start_date.strftime('%Y-%m-%d')}&end_date={end_date.strftime('%Y-%m-%d')}&base={base_currency}&symbols={target_currency}"
+    url = f"https://api.frankfurter.dev/v1/timeseries?start={start_date.strftime('%Y-%m-%d')}&end={end_date.strftime('%Y-%m-%d')}&base={base_currency}&symbols={target_currency}"
     
     try:
         response = requests.get(url).json()
@@ -42,12 +42,11 @@ def obtener_datos_historicos(base_currency, target_currency):
 
 # Opciones de divisas
 base_div = st.sidebar.selectbox("Moneda Base", ["USD", "EUR", "GBP"])
-target_div = st.sidebar.selectbox("Moneda Destino", ["MXN", "BRL", "ARS", "EUR", "JPY"], index=0)
+target_div = st.sidebar.selectbox("Moneda Destino", ["MXN", "BRL", "ARS", "JPY"], index=0)
 
 df_historico = obtener_datos_historicos(base_div, target_div)
 
 # 3. Inteligencia Artificial: Ajuste por Regresión Lineal blindado
-# Aseguramos que X e y sean arreglos NumPy de dos dimensiones y tipo flotante correcto
 X = np.arange(len(df_historico)).astype(float).reshape(-1, 1)
 y = df_historico['Precio'].values.astype(float)
 
@@ -63,8 +62,33 @@ mu_calculada = pendiente_m / S_0
 volatilidad = st.sidebar.slider("Volatilidad del mercado (σ)", min_value=0.005, max_value=0.080, value=0.020, step=0.005)
 caminos_simulados = st.sidebar.slider("Número de trayectorias alternativas", min_value=5, max_value=50, value=15, step=5)
 
-# 4. Diseño de pestañas funcionales del proyecto
-tab1, tab2, tab3 = st.tabs(["📊 Simulación y EDO", "📐 Fundamentación Matemática", "🚨 Pruebas de Estrés"])
+# 4. NUEVO CAMBIO: Resumen del Modelo al inicio de la aplicación
+st.subheader("📋 Resumen del Modelo")
+col_res1, col_res2, col_res3 = st.columns(3)
+with col_res1:
+    st.markdown(f"""
+    * **Fenómeno económico:** Tipo de cambio entre divisas ({base_div}/{target_div}).
+    * **Modelo matemático:** $\\frac{{dS}}{{dt}} = \\mu S(t)$
+    """)
+with col_res2:
+    st.markdown("""
+    * **Método de solución:** Separación de variables.
+    * **Solución analítica:** $S(t) = S_0 e^{\\mu t}$
+    """)
+with col_res3:
+    st.markdown("""
+    * **IA utilizada:** Regresión Lineal (Mínimos Cuadrados Ordinarios).
+    * **Fuente de datos:** API Frankfurter (Banco Central Europeo).
+    """)
+st.markdown("---")
+
+# 5. Diseño de pestañas funcionales del proyecto (Se añade la pestaña 'Acerca del Proyecto')
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📊 Simulación y EDO", 
+    "📐 Fundamentación Matemática", 
+    "🚨 Pruebas de Estrés",
+    "📚 Acerca del Proyecto"
+])
 
 # ==========================================
 # PESTAÑA 1: SIMULACIÓN Y EDO
@@ -75,33 +99,43 @@ with tab1:
     col_izq, col_der = st.columns([1, 2])
     
     with col_izq:
-        st.subheader("📋 Parámetros calculados por la IA")
-        st.write("A partir del análisis de mínimos cuadrados sobre la tendencia histórica de 30 días, se han parametrizado las variables de la EDO:")
+        st.subheader("🔬 Parámetros calculados por la IA")
+        st.write("""
+        La inteligencia artificial analiza los datos históricos del tipo de cambio mediante una regresión lineal. 
+        A partir de la pendiente obtenida calcula automáticamente el parámetro $\\mu$, el cual representa la tendencia 
+        del modelo matemático y es utilizado directamente en la ecuación diferencial.
+        """)
         
         st.metric(label="Tipo de cambio actual ($S_0$)", value=f"{S_0:.4f} {target_div}")
         st.metric(label="Pendiente de la regresión ($m$)", value=f"{pendiente_m:.6f}")
-        st.metric(label="Tasa intrínseca de deriva ($\mu = m / S_0$)", value=f"{mu_calculada:.6f}")
+        st.markdown(f"**Fórmula de cálculo:** $\\mu = \\frac{{m}}{{S_0}}$")
+        st.metric(label="Valor final de parámetro de tendencia ($\\mu$)", value=f"{mu_calculada:.6f}")
         
         st.subheader("📝 Ecuaciones del Momento")
         st.markdown("**Ecuación Diferencial Ajustada:**")
-        st.latex(rf"\frac{{dS}}{{dt}} = {mu_calculada:.5f} \cdot S(t)")
+        st.latex(rf"rac{{dS}}{{dt}} = {mu_calculada:.5f} \cdot S(t)")
         
         st.markdown("**Solución Particular del Sistema:**")
         st.latex(rf"S(t) = {S_0:.4f} \cdot e^{{{mu_calculada:.5f} \cdot t}}")
         
-        # Sección Automática de Interpretación Económica
+        # 7. Sección Automática de Interpretación Económica Mejorada
         st.subheader("💡 Interpretación Económica")
         if mu_calculada > 0.0001:
-            st.success(f"**Tendencia Creciente ($\mu > 0$):** El modelo matemático indica una depreciación de la moneda base frente al {target_div}. Se proyecta una presión al alza en el tipo de cambio debido a fuerzas sostenidas del mercado.")
+            st.success(f"**Solución Creciente ($\\mu > 0$):** La solución de la ecuación diferencial es creciente, lo que indica una tendencia de aumento del tipo de cambio durante el periodo analizado. En términos económicos, esto representa una depreciación de la moneda de destino frente a la moneda base.")
         elif mu_calculada < -0.0001:
-            st.warning(f"**Tendencia Decreciente ($\mu < 0$):** El sistema matemático muestra una trayectoria de apreciación. El par de divisas tiende a la baja, lo que indica un fortalecimiento de la moneda de destino.")
+            st.warning(f"**Solución Decreciente ($\\mu < 0$):** La solución de la ecuación diferencial es decreciente, indicando una disminución del tipo de cambio. Esto representa un fortalecimiento de la moneda de destino.")
         else:
-            st.info(rf"**Tendencia Estable ($\mu \approx 0$):** El mercado se encuentra en un equilibrio dinámico estacionario. No se registran presiones estructurales significativas en ninguna dirección.")
+            st.info(rf"**Solución Constante ($\\mu \\approx 0$):** El modelo muestra un comportamiento prácticamente constante, lo que representa un mercado estable durante el periodo observado.")
 
     with col_der:
-        st.subheader("📉 Comparación: EDO Determinista vs Trayectoria Real e Incertidumbre")
+        st.subheader("📉 Comparación: EDO Determinista vs Trayectorias de Simulación")
         
-        # Simulación del futuro (24 periodos / horas adelante)
+        # 5. Explicar claramente la diferencia entre la EDO y las simulaciones
+        st.info("""
+        💡 **Interpretación de la gráfica:** La curva principal representa la solución analítica de la ecuación diferencial ordinaria. Las trayectorias adicionales representan simulaciones con incertidumbre basadas en el comportamiento observado del mercado y sirven únicamente para analizar posibles escenarios futuros.
+        """)
+        
+        # Simulación del futuro (24 periodos / horizonte de simulación)
         T = 24
         t_sim = np.arange(T + 1)
         
@@ -110,12 +144,12 @@ with tab1:
         
         fig = go.Figure()
         
-        # Añadir trayectorias de simulación con incertidumbre
+        # Añadir trayectorias de simulación con incertidumbre (Euler-Maruyama interno)
         for i in range(caminos_simulados):
             caminos = [S_0]
             for t in range(T):
                 shock = np.random.normal(0, 1)
-                # Modelo dinámico con ruido blanco incorporado
+                # Modelo dinámico con ruido incorporado
                 S_siguiente = caminos[-1] * (1 + mu_calculada + volatilidad * shock)
                 caminos.append(S_siguiente)
             fig.add_trace(go.Scatter(x=t_sim, y=caminos, mode='lines', line=dict(width=1), opacity=0.35, showlegend=False))
@@ -124,17 +158,22 @@ with tab1:
         fig.add_trace(go.Scatter(x=t_sim, y=solucion_edo, mode='lines+markers', name='Solución Analítica EDO', line=dict(color='#00FFCC', width=3.5)))
         
         fig.update_layout(
-            title=f"Proyección del Tipo de Cambio para las próximas 24 horas ({base_div}/{target_div})",
-            xaxis_title="Tiempo futuro (Horas)",
+            title=f"Proyección del Tipo de Cambio para el Horizonte de Simulación ({base_div}/{target_div})",
+            xaxis_title="Tiempo futuro (Periodos)",
             yaxis_title=f"Unidades de {target_div}",
             template="plotly_dark",
             legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)
         )
         st.plotly_chart(fig, use_container_width=True)
 
-# 8. Gráfica Comparativa con Histórico Real
+# 8. Gráfica Comparativa con Histórico Real Mejorada
 st.markdown("---")
 st.subheader("📅 Ajuste del Modelo sobre los Datos Históricos Reales (Últimos 30 días)")
+
+st.markdown("""
+La curva obtenida mediante la ecuación diferencial representa una aproximación matemática de la tendencia del mercado. 
+Los datos reales pueden presentar pequeñas fluctuaciones debido a factores económicos externos que no forman parte del modelo.
+""")
 
 dias_historicos = np.arange(len(df_historico))
 precio_inicial_hist = df_historico['Precio'].iloc[0]
@@ -161,7 +200,7 @@ with tab2:
     
     st.markdown("""
     ### 🏛️ Fenómeno Económico Estudiado
-    En la teoría microeconómica y financiera moderna, el precio de una divisa refleja un flujo constante de información disponible en los mercados globales. Si asumimos un mercado eficiente y continuo sin fricciones externas instantáneas, la variación del valor del tipo de cambio respecto al tiempo es directamente proporcional al valor actual del activo.
+    En la teoría económica y financiera, el precio de una divisa refleja la relación de valor entre dos economías bajo un flujo dinámico de información. Si asumimos un comportamiento continuo y sin fricciones externas instantáneas en el mediano plazo, la variación del valor del tipo de cambio respecto al tiempo es directamente proporcional al valor actual del tipo de cambio.
     """)
     
     col1, col2 = st.columns(2)
@@ -171,7 +210,7 @@ with tab2:
         st.write("Planteamos un modelo lineal homogéneo de primer orden:")
         st.latex(r"\frac{dS}{dt} = \mu S(t)")
         st.write("Donde:")
-        st.markdown(f"- **$S(t)$**: Es el tipo de cambio en el tiempo $t$.\n- **$\mu$**: Tasa intrínseca de rendimiento o velocidad de deriva constante.")
+        st.markdown(f"- **$S(t)$**: Es el tipo de cambio en el tiempo $t$.\n- **$\\mu$**: Parámetro de crecimiento o decrecimiento del tipo de cambio.")
         
     with col2:
         st.info("#### 🔬 Método de Solución: Separación de Variables")
@@ -183,32 +222,33 @@ with tab2:
     st.markdown("### 🔑 Solución Analítica General y Particular")
     st.write("Despejando nuestra variable dependiente mediante la función exponencial obtenemos la solución explícita:")
     st.latex(r"S(t) = e^{\mu t + C} = e^C \cdot e^{\mu t} \implies S(t) = S_0 e^{\mu t}")
-    st.write(f"Donde $S_0$ representa las condiciones iniciales del mercado capturadas en tiempo real por la Inteligencia Artificial al instante de ejecución ($S_0 = {S_0:.4f}$).")
+    st.write(f"Donde $S_0$ representa las condiciones iniciales del mercado capturadas por la Inteligencia Artificial al instante de ejecución ($S_0 = {S_0:.4f}$).")
 
 
 # ==========================================
 # PESTAÑA 3: PRUEBAS DE ESTRÉS
 # ==========================================
 with tab3:
-    st.header("🚨 Simulación de Escenarios y Crisis Macroeconómicas")
-    st.write("Modificación controlada de los coeficientes de la ecuación diferencial para analizar comportamientos de la divisa ante impactos financieros extremos mundiales.")
+    st.header("🚨 Simulación de Escenarios y Crisis")
+    st.write("Modificación controlada de los coeficientes de la ecuación diferencial para analizar comportamientos de la divisa ante impactos financieros extremos.")
     
+    # 3. Mejorar los nombres de los escenarios
     escenario = st.radio("Seleccione el Escenario a evaluar:", 
-                         ["Estable (Línea Base de la IA)", "Shock Geopolítico Global", "Colapso Estructural de la Moneda"])
+                         ["Mercado Normal", "Crisis Económica", "Alta Volatilidad del Mercado"])
     
     # Redefinición dinámica de variables EDO según el test
-    if escenario == "Estable (Línea Base de la IA)":
+    if escenario == "Mercado Normal":
         mu_stress = mu_calculada
         sigma_stress = volatilidad
-        desc_escenario = "Mantiene los parámetros óptimos detectados mediante la regresión de aprendizaje predictivo."
-    elif escenario == "Shock Geopolítico Global":
+        desc_escenario = "Mantiene los parámetros estándar estimados a través de la regresión lineal."
+    elif escenario == "Crisis Económica":
+        mu_stress = -0.025
+        sigma_stress = volatilidad * 1.5
+        desc_escenario = "Simula una fuerte devaluación de la divisa: Tasa de tendencia decreciente acelerada con volatilidad moderada."
+    else: # Alta Volatilidad del Mercado
         mu_stress = 0.0000 
         sigma_stress = volatilidad * 3.5
-        desc_escenario = "Simula parálisis comercial internacional masiva: La tendencia media se colapsa a cero, pero la volatilidad se multiplica drásticamente por 350%."
-    else: # Colapso Estructural
-        mu_stress = -0.025
-        sigma_stress = volatilidad * 1.8
-        desc_escenario = "Simula una fuga masiva de capitales de la región. La tasa de cambio decae exponencialmente de forma severa y continua."
+        desc_escenario = "Simula inestabilidad de precios extrema y un mercado errático: Tendencia nula con variaciones críticas."
         
     st.markdown(f"**Condición Operativa:** {desc_escenario}")
     
@@ -225,5 +265,43 @@ with tab3:
         fig_stress.add_trace(go.Scatter(x=t_sim, y=caminos_st, mode='lines', line=dict(width=1), opacity=0.3, showlegend=False))
         
     fig_stress.add_trace(go.Scatter(x=t_sim, y=solucion_stress, mode='lines', name='Trayectoria EDO en Crisis', line=dict(color='#FF0055', width=3)))
-    fig_stress.update_layout(xaxis_title="Tiempo (Horas)", yaxis_title="Precio de la Divisa", template="plotly_dark")
+    fig_stress.update_layout(
+        title=f"Horizonte de Simulación bajo Escenario: {escenario}",
+        xaxis_title="Tiempo (Periodos)", 
+        yaxis_title="Precio de la Divisa", 
+        template="plotly_dark"
+    )
     st.plotly_chart(fig_stress, use_container_width=True)
+
+
+# ==========================================
+# PESTAÑA 4: ACERCA DEL PROYECTO
+# ==========================================
+with tab4:
+    st.header("📚 Acerca del Proyecto")
+    st.markdown(f"""
+    ### 🎯 Objetivo General
+    El propósito de este simulador es modelar de forma rigurosa la trayectoria del tipo de cambio entre las divisas 
+    **{base_div}** y **{target_div}** utilizando una **Ecuación Diferencial Ordinaria (EDO) de primer orden**, parametrizada 
+    automáticamente con el apoyo de algoritmos de **Inteligencia Artificial**.
+    
+    ### 🛠️ La Ecuación Diferencial Ordinaria (EDO)
+    El comportamiento dinámico se rige bajo la hipótesis económica de variación proporcional constante:
+    $$\\frac{{dS}}{{dt}} = \\mu S(t)$$
+    Donde:
+    * **$S(t)$** es el valor estimado de la divisa.
+    * **$\\mu$** representa el parámetro de crecimiento o decrecimiento del tipo de cambio.
+    
+    Aplicando el método de **Separación de Variables**, se obtiene de forma analítica la solución particular exacta:
+    $$S(t) = S_0 e^{{\\mu t}}$$
+    
+    ### 🧠 El Rol de la Inteligencia Artificial (IA)
+    Para que el modelo sea dinámico y se adapte en tiempo real, se descarga el historial del último mes y se ajusta una 
+    **Regresión Lineal por Mínimos Cuadrados**. La pendiente resultante de esta recta ($m$) es escalada matemáticamente 
+    para fijar el parámetro $\\mu$ sin suposiciones empíricas arbitrarias, asegurando un vínculo directo entre los datos 
+    del mercado real y la teoría de ecuaciones diferenciales.
+    
+    ### 📌 Conclusiones Principales
+    1. **Sinergia Matemática:** La integración entre modelos clásicos deterministas (EDO) y enfoques de aprendizaje automático (IA) permite calibrar sistemas dinámicos con precisión quirúrgica en tiempo real.
+    2. **Validez Estructural:** Aunque la solución exacta de la EDO proporciona una excelente línea base de la tendencia de mediano plazo, las simulaciones complementarias demuestran la importancia de considerar factores estocásticos en escenarios altamente especulativos.
+    """)
