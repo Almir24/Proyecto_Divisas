@@ -1,256 +1,225 @@
 import streamlit as st
-import requests
+import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import requests
+from sklearn.linear_model import LinearRegression
 from datetime import datetime, timedelta
 
-# Configuración de la página web
-st.set_page_config(page_title="Plataforma de Ingeniería Financiera Avanzada (EDO)", layout="wide")
+# 1. Configuración de la página y título centrado en EDO y Economía
+st.set_page_config(page_title="Simulador EDO Divisas", layout="wide", initial_sidebar_state="expanded")
 
-st.title("🏛️ Sistema de Ingeniería Financiera y Modelado de Divisas mediante EDO")
-st.write("Proyecto Escolar Acreditado (ESE-IPN): Integración de EDO/EDE, Estimación de Parámetros mediante IA (Regresión ML) y Pruebas de Estrés.")
+st.title("💱 Simulador del Tipo de Cambio mediante Ecuaciones Diferenciales e Inteligencia Artificial")
 st.markdown("---")
 
-# Lista de monedas estables soportadas por la API pública
-NOMBRES_MONEDAS = {
-    "USD": "USD - Dólar estadounidense",
-    "MXN": "MXN - Peso mexicano",
-    "EUR": "EUR - Euro",
-    "GBP": "GBP - Libra esterlina",
-    "JPY": "JPY - Yen japonés",
-    "CAD": "CAD - Dólar canadiense",
-    "AUD": "AUD - Dólar australiano",
-    "BRL": "BRL - Real brasileño",
-    "CHF": "CHF - Franco suizo",
-    "CNY": "CNY - Yuan chino"
-}
+# 2. Sidebar: Selección de parámetros y consumo de API en tiempo real
+st.sidebar.header("⚙️ Configuración del Modelo")
 
-# Layout Principal
-col_m1, col_m2 = st.columns(2)
-with col_m1:
-    idx_usd = list(NOMBRES_MONEDAS.keys()).index("USD")
-    opcion_origen = st.selectbox("Moneda Base (Origen):", [f"{k} - {v}" for k, v in NOMBRES_MONEDAS.items()], index=idx_usd)
-    codigo_origen = opcion_origen.split(" - ")[0]
-with col_m2:
-    idx_mxn = list(NOMBRES_MONEDAS.keys()).index("MXN")
-    opcion_destino = st.selectbox("Moneda Cotizada (Destino):", [f"{k} - {v}" for k, v in NOMBRES_MONEDAS.items()], index=idx_mxn)
-    codigo_destino = opcion_destino.split(" - ")[0]
-
-if codigo_origen == codigo_destino:
-    st.warning("⚠️ Selecciona dos monedas diferentes para activar los modelos.")
-    st.stop()
-
-# Conexión a API Real
-@st.cache_data(ttl=600)
-def obtener_datos_reales_mercado(origen, destino):
-    try:
-        fecha_fin = datetime.now().strftime('%Y-%m-%d')
-        fecha_inicio = (datetime.now() - timedelta(days=45)).strftime('%Y-%m-%d')
-        url_historial = f"https://api.frankfurter.app/{fecha_inicio}..{fecha_fin}?from={origen}&to={destino}"
-        res_hist = requests.get(url_historial).json()
-        
-        fechas_ordenadas = sorted(list(res_hist['rates'].keys()))
-        historial_precios = [res_hist['rates'][f][destino] for f in fechas_ordenadas]
-        fechas_formateadas = [datetime.strptime(f, '%Y-%m-%d').strftime('%d-%b') for f in fechas_ordenadas]
-        
-        historial_precios = historial_precios[-30:]
-        fechas_formateadas = fechas_formateadas[-30:]
-        precio_hoy = historial_precios[-1]
-        
-        url_actual = f"https://api.frankfurter.app/latest?from={origen}"
-        res_act = requests.get(url_actual).json()
-        tasas_dia = res_act['rates']
-        tasas_dia[origen] = 1.0
-        
-        return precio_hoy, historial_precios, fechas_formateadas, tasas_dia
-    except Exception as e:
-        return 1.00, [1.00]*30, ["Día"]*30, {"USD": 1.0, "MXN": 18.0}
-
-precio_actual, historial_real, fechas_reales, todas_las_tasas = obtener_datos_reales_mercado(codigo_origen, codigo_destino)
-
-# Métricas reales principales
-st.markdown("### 📊 Monitor de Mercado Real (Datos del Banco Central Europeo)")
-c_1, c_2, c_3 = st.columns(3)
-with c_1:
-    cantidad_input = st.number_input(f"Monto a Convertir ({codigo_origen}):", min_value=1.0, value=100.0)
-with c_2:
-    st.metric(label=f"Tasa Real Spot ({codigo_origen}/{codigo_destino})", value=f"{precio_actual:.4f}")
-with c_3:
-    st.metric(label="Monto Convertido Real", value=f"{cantidad_input * precio_actual:.2f} {codigo_destino}")
-
-# ================= INTEGRACIÓN DE IA (MODELO DE APRENDIZAJE SUPERVISADO) =================
-# Implementamos una Regresión Lineal por Mínimos Cuadrados (OLS) para predecir la deriva de la EDO (mu)
-x_datos = np.arange(len(historial_real))
-y_datos = np.array(historial_real)
-
-# Ecuaciones normales de regresión de IA: y = mx + b
-n_puntos = len(x_datos)
-pendiente_m = (n_puntos * np.sum(x_datos * y_datos) - np.sum(x_datos) * np.sum(y_datos)) / (n_puntos * np.sum(x_datos**2) - (np.sum(x_datos))**2)
-
-# Normalizar la pendiente para obtener la tasa de rendimiento instantánea (Deriva mu)
-mu_estimada_ia = float(pendiente_m / precio_actual)
-
-# Estimación de la volatilidad empírica (sigma) basada en la desviación estándar de retornos logarítmicos reales
-retornos_log = np.diff(np.log(historial_real))
-sigma_estimada = float(np.std(retornos_log)) if len(retornos_log) > 0 else 0.015
-
-# Controles laterales
-st.sidebar.header("⚙️ Parámetros de la EDO e IA")
-volatilidad = st.sidebar.slider("Volatilidad Proyectada (σ):", 0.005, 0.06, sigma_estimada, step=0.005)
-simulaciones = st.sidebar.slider("Trayectorias de Montecarlo:", 10, 150, 50, step=10)
-
-# Indicadores técnicos adicionales
-media_movil = np.mean(historial_real[-14:])
-desviacion = np.std(historial_real[-14:])
-banda_sup = media_movil + (2 * desviacion)
-banda_inf = media_movil - (2 * desviacion)
-
-cambios = np.diff(historial_real[-15:])
-ganancias = cambios[cambios > 0]
-perdidas = -cambios[cambios < 0]
-rsi = 100 - (100 / (1 + (np.mean(ganancias)/np.mean(perdidas)))) if len(perdidas) > 0 and len(ganancias) > 0 else 50.0
-
-st.markdown("---")
-
-# PESTAÑAS ESTRUCTURADAS EXCLUSIVAMENTE BAJO LA RÚBRICA
-tab_teoria, tab_futuro, tab_historial, tab_arbitraje, tab_stress = st.tabs([
-    "📝 Marco Teórico y Solución de la EDO",
-    "🎲 Modelado Estocástico Futuro (EDE)", 
-    "📈 Datos Históricos Reales (30 Días)", 
-    "⛓️ Red de Arbitraje Cruzado",
-    "💥 Pruebas de Estrés (Stress Testing)"
-])
-
-# ================= TAB 0: MARCO TEÓRICO Y SOLUCIÓN PASO A PASO =================
-with tab_teoria:
-    st.subheader("📚 Sustentación Matemática y Económica del Proyecto (Rúbrica IPN)")
+@st.cache_data(ttl=3600)
+def obtener_datos_historicos(base_currency, target_currency):
+    """Obtiene datos reales de los últimos 30 días usando una API pública."""
+    end_date = datetime.today()
+    start_date = end_date - timedelta(days=45) # Margen para asegurar 30 días hábiles
     
-    col_t1, col_t2 = st.columns(2)
-    with col_t1:
-        st.markdown("#### 1. Planteamiento Matemático de la EDO")
-        st.write("Para modelar el comportamiento del tipo de cambio, partimos de una EDO lineal de primer orden donde la variación del precio $S$ es proporcional a su valor actual en el tiempo $t$:")
+    url = f"https://api.exchangerate.host/timeseries?start_date={start_date.strftime('%Y-%m-%d')}&end_date={end_date.strftime('%Y-%m-%d')}&base={base_currency}&symbols={target_currency}"
+    
+    try:
+        response = requests.get(url).json()
+        rates = response.get('rates', {})
+        fechas = sorted(list(rates.keys()))
+        precios = [rates[fecha][target_currency] for fecha in fechas if target_currency in rates[fecha]]
+        
+        df = pd.DataFrame({"Fecha": pd.to_datetime(fechas[-30:]), "Precio": precios[-30:]})
+        return df
+    except Exception:
+        # Respaldo local en caso de falla de red o API
+        fechas_mock = pd.date_range(end=datetime.today(), periods=30, freq='D')
+        precios_mock = np.linspace(17.5, 18.2, 30) + np.random.normal(0, 0.1, 30)
+        return pd.DataFrame({"Fecha": fechas_mock, "Precio": precios_mock})
+
+# Opciones de divisas
+base_div = st.sidebar.selectbox("Moneda Base", ["USD", "EUR", "GBP"])
+target_div = st.sidebar.selectbox("Moneda Destino", ["MXN", "BRL", "ARS", "EUR", "JPY"], index=0)
+
+df_historico = obtener_datos_historicos(base_div, target_div)
+
+# 3. Inteligencia Artificial: Ajuste por Regresión Lineal
+X = np.arange(len(df_historico)).reshape(-1, 1)
+y = df_historico['Precio'].values
+
+modelo_ia = LinearRegression()
+modelo_ia.fit(X, y)
+
+# Parámetros clave extraídos por la IA
+pendiente_m = modelo_ia.coef_[0]
+S_0 = y[-1] # Último precio real conocido del mercado
+mu_calculada = pendiente_m / S_0
+
+# Configuración de simulaciones estocásticas internas en sidebar
+volatilidad = st.sidebar.slider("Volatilidad del mercado (σ)", min_value=0.005, max_value=0.080, value=0.020, step=0.005)
+caminos_simulados = st.sidebar.slider("Número de trayectorias alternativas", min_value=5, max_value=50, value=15, step=5)
+
+# 4. Diseño de pestañas funcionales del proyecto
+tab1, tab2, tab3 = st.tabs(["📊 Simulación y EDO", "📐 Fundamentación Matemática", "🚨 Pruebas de Estrés"])
+
+# ==========================================
+# PESTAÑA 1: SIMULACIÓN Y EDO
+# ==========================================
+with tab1:
+    st.header("📈 Análisis de Tendencia y Proyección Dinámica")
+    
+    col_izq, col_der = st.columns([1, 2])
+    
+    with col_izq:
+        st.subheader("📋 Parámetros calculados por la IA")
+        st.write("A partir del análisis de mínimos cuadrados sobre la tendencia histórica de 30 días, se han parametrizado las variables de la EDO:")
+        
+        st.metric(label="Tipo de cambio actual ($S_0$)", value=f"{S_0:.4f} {target_div}")
+        st.metric(label="Pendiente de la regresión ($m$)", value=f"{pendiente_m:.6f}")
+        st.metric(label="Tasa intrínseca de deriva ($\mu = m / S_0$)", value=f"{mu_calculada:.6f}")
+        
+        st.subheader("📝 Ecuaciones del Momento")
+        st.markdown("**Ecuación Diferencial Ajustada:**")
+        st.latex(rf"\frac{{dS}}{{dt}} = {mu_calculada:.5f} \cdot S(t)")
+        
+        st.markdown("**Solución Particular del Sistema:**")
+        st.latex(rf"S(t) = {S_0:.4f} \cdot e^{{{mu_calculada:.5f} \cdot t}}")
+        
+        # 7. Sección Automática de Interpretación Económica
+        st.subheader("💡 Interpretación Económica")
+        if mu_calculada > 0.0001:
+            st.success(f"**Tendencia Creciente ($\mu > 0$):** El modelo matemático indica una depreciación de la moneda base frente al {target_div}. Se proyecta una presión al alza en el tipo de cambio debido a fuerzas sostenidas del mercado.")
+        elif mu_calculada < -0.0001:
+            st.warning(f"**Tendencia Decreciente ($\mu < 0$):** El sistema matemático muestra una trayectoria de apreciación. El par de divisas tiende a la baja, lo que indica un fortalecimiento de la moneda de destino.")
+        else:
+            st.info(rf"**Tendencia Estable ($\mu \approx 0$):** El mercado se encuentra en un equilibrio dinámico estacionario. No se registran presiones estructurales significativas en ninguna dirección.")
+
+    with col_der:
+        st.subheader("📉 Comparación: EDO Determinista vs Trayectoria Real e Incertidumbre")
+        
+        # Simulación del futuro (24 periodos / horas adelante)
+        T = 24
+        t_sim = np.arange(T + 1)
+        
+        # Solución exacta de la EDO
+        solucion_edo = S_0 * np.exp(mu_calculada * t_sim)
+        
+        fig = go.Figure()
+        
+        # Añadir trayectorias de simulación con incertidumbre (Euler-Maruyama interno)
+        for i in range(caminos_simulados):
+            caminos = [S_0]
+            for t in range(T):
+                shock = np.random.normal(0, 1)
+                # Modelo dinámico con ruido blanco incorporado
+                S_siguiente = caminos[-1] * (1 + mu_calculada + volatilidad * shock)
+                caminos.append(S_siguiente)
+            fig.add_trace(go.Scatter(x=t_sim, y=caminos, mode='lines', line=dict(width=1), opacity=0.35, showlegend=False))
+            
+        # Graficar solución central analítica de la EDO
+        fig.add_trace(go.Scatter(x=t_sim, y=solucion_edo, mode='lines+markers', name='Solución Analítica EDO', line=dict(color='#00FFCC', width=3.5)))
+        
+        fig.update_layout(
+            title=f"Proyección del Tipo de Cambio para las próximas 24 horas ({base_div}/{target_div})",
+            xaxis_title="Tiempo futuro (Horas)",
+            yaxis_title=f"Unidades de {target_div}",
+            template="plotly_dark",
+            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+# 8. Gráfica Comparativa con Histórico Real
+st.markdown("---")
+st.subheader("📅 Ajuste del Modelo sobre los Datos Históricos Reales (Últimos 30 días)")
+
+dias_historicos = np.arange(len(df_historico))
+precio_inicial_hist = df_historico['Precio'].iloc[0]
+curva_edo_historica = precio_inicial_hist * np.exp(mu_calculada * dias_historicos)
+
+fig_hist = go.Figure()
+fig_hist.add_trace(go.Scatter(x=df_historico['Fecha'], y=df_historico['Precio'], mode='markers+lines', name='Precios Reales de Mercado', line=dict(color='#FF9900', width=2)))
+fig_hist.add_trace(go.Scatter(x=df_historico['Fecha'], y=curva_edo_historica, mode='lines', name='Trayectoria Teórica EDO', line=dict(color='#00CCFF', width=2.5, dash='dash')))
+
+fig_hist.update_layout(
+    xaxis_title="Línea de Tiempo",
+    yaxis_title=f"Precio ({target_div})",
+    template="plotly_dark",
+    margin=dict(l=40, r=40, t=20, b=40)
+)
+st.plotly_chart(fig_hist, use_container_width=True)
+
+
+# ==========================================
+# PESTAÑA 2: FUNDAMENTACIÓN MATEMÁTICA
+# ==========================================
+with tab2:
+    st.header("📐 Estructura Matemática del Sistema Dinámico Económico")
+    
+    st.markdown("""
+    ### 🏛️ Fenómeno Económico Estudiado
+    En la teoría microeconómica y financiera moderna, el precio de una divisa refleja un flujo constante de información disponible en los mercados globales. Si asumimos un mercado eficiente y continuo sin fricciones externas instantáneas, la variación del valor del tipo de cambio respecto al tiempo es directamente proporcional al valor actual del activo.
+    """)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.info("#### 🛠️ Ecuación Diferencial Ordinaria (EDO)")
+        st.write("Planteamos un modelo lineal homogéneo de primer orden:")
         st.latex(r"\frac{dS}{dt} = \mu S(t)")
         st.write("Donde:")
-        st.write("* **$S(t)$:** Variable dependiente (Precio del tipo de cambio).")
-        st.write("* **$t$:** Variable independiente (Tiempo en el horizonte proyectado).")
-        st.write("* **$\mu$:** Parámetro de Deriva o Tendencia (Tasa de rendimiento instantánea).")
+        st.markdown(f"- **$S(t)$**: Es el tipo de cambio en el tiempo $t$.\n- **$\mu$**: Tasa intrínseca de rendimiento o velocidad de deriva constante.")
         
-        st.markdown("#### 2. Solución Analítica Paso a Paso (Separación de Variables)")
-        st.write("**Paso A: Reordenar términos:**")
-        st.latex(r"\frac{1}{S} \, dS = \mu \, dt")
-        st.write("**Paso B: Integración a ambos lados:**")
-        st.latex(r"\int \frac{1}{S} \, dS = \int \mu \, dt \implies \ln(S) = \mu t + C")
-        st.write("**Paso C: Despejar variable mediante función exponencial:**")
-        st.latex(r"S(t) = e^{\mu t + C} = e^C \cdot e^{\mu t}")
-        st.write("**Paso D: Aplicación de la condición inicial $S(0) = S_0$ (Tasa Spot real de hoy):**")
-        st.latex(r"S(t) = S_0 e^{\mu t}")
-
-    with col_t2:
-        st.markdown("#### 3. Transición al Modelo Estocástico (Lema de Itô)")
-        st.write("Dado que los mercados financieros son dinámicos y caóticos, agregamos un término estocástico (ruido blanco) mediante una Ecuación Diferencial Estocástica (EDE):")
-        st.latex(r"dS_t = \mu S_t dt + \sigma S_t dW_t")
-        st.write("Resolviendo mediante el **Lema de Itô**, la solución fuerte analítica de esta EDE es:")
-        st.latex(r"S(t) = S_0 \exp\left(\left(\mu - \frac{\sigma^2}{2}\right)t + \sigma W_t\right)")
-        st.write("Para la simulación por computadora, se aplica la aproximación numérica de **Euler-Maruyama**:")
-        st.latex(r"S_{t+\Delta t} = S_t \exp\left(\left(\mu - \frac{\sigma^2}{2}\right)\Delta t + \sigma \sqrt{\Delta t} Z\right), \quad Z \sim N(0,1)")
-
-        st.markdown("#### 4. Rol Funcional de la Inteligencia Artificial (Machine Learning)")
-        st.success(f"""
-        **Modelo de IA Empleado:** Regresión Lineal por Mínimos Cuadrados Ordinarios (OLS).
-        * **Justificación:** En lugar de asumir un parámetro estático o intuitivo para la tendencia ($\mu$), entrenamos un regresor supervisado con la serie de tiempo real del BCE de los últimos 30 días.
-        * **Pendiente Estimada por IA ($m$):** {pendiente_m:.6f}
-        * **Deriva resultante ($\mu$):** {mu_estimada_ia:.6f} (Este valor alimenta directamente la EDO en la simulación).
-        """)
-
-# ================= TAB 1: MONTECARLO & EDE =================
-with tab_futuro:
-    st.subheader("🔮 Simulación Hacia Adelante aplicando Euler-Maruyama")
-    st.latex(r"S(t) = S_0 \exp\left(\left(\mu - \frac{\sigma^2}{2}\right)t + \sigma W_t\right)")
-    
-    horas = np.linspace(0, 24, 100)
-    dt = horas[1] - horas[0]
-    
-    fig_montecarlo = go.Figure()
-    edo_pura = precio_actual * np.exp(mu_estimada_ia * horas)
-    
-    for _ in range(simulaciones):
-        camino = [precio_actual]
-        for t in range(1, len(horas)):
-            dW = np.random.normal(0, np.sqrt(dt))
-            nuevo_precio = camino[-1] * np.exp((mu_estimada_ia - 0.5 * volatilidad**2) * dt + volatilidad * dW)
-            camino.append(nuevo_precio)
-        fig_montecarlo.add_trace(go.Scatter(x=horas, y=camino, mode='lines', line=dict(width=1), opacity=0.3, showlegend=False))
+    with col2:
+        st.info("#### 🔬 Método de Solución: Separación de Variables")
+        st.write("Agrupamos términos semejantes en cada lado de la igualdad:")
+        st.latex(r"\frac{1}{S} dS = \mu dt")
+        st.write("Aplicando el operador de integración indefinida en ambos lados:")
+        st.latex(r"\int \frac{1}{S} dS = \int \mu dt \implies \ln|S| = \mu t + C")
         
-    fig_montecarlo.add_trace(go.Scatter(x=horas, y=edo_pura, mode='lines', name='Solución Determinista de la EDO', line=dict(color='#FF4B4B', width=4)))
-    fig_montecarlo.update_layout(title=f"Proyección Dinámica del Par {codigo_origen}/{codigo_destino}", xaxis_title="Horas Hacia el Futuro", yaxis_title="Precio", template="plotly_dark")
-    st.plotly_chart(fig_montecarlo, use_container_width=True)
+    st.markdown("### 🔑 Solución Analítica General y Particular")
+    st.write("Despejando nuestra variable dependiente mediante la función exponencial obtenemos la solución explícita:")
+    st.latex(r"S(t) = e^{\mu t + C} = e^C \cdot e^{\mu t} \implies S(t) = S_0 e^{\mu t}")
+    st.write(f"Donde $S_0$ representa las condiciones iniciales del mercado capturadas en tiempo real por la Inteligencia Artificial al instante de ejecución ($S_0 = {S_0:.4f}$).")
 
-# ================= TAB 2: HISTORIAL REAL =================
-with tab_historial:
-    st.subheader("📈 Gráfica de Rango de Datos Reales")
-    fig_historial = go.Figure()
-    fig_historial.add_trace(go.Scatter(x=fechas_reales, y=historial_real, mode='lines+markers', name='Precio Real', line=dict(color='#00CC96', width=3)))
-    fig_historial.add_trace(go.Scatter(x=fechas_reales, y=[banda_sup]*30, mode='lines', name='Banda Sup (Sobrecompra)', line=dict(color='#FF9200', dash='dash')))
-    fig_historial.add_trace(go.Scatter(x=fechas_reales, y=[banda_inf]*30, mode='lines', name='Banda Inf (Soporte)', line=dict(color='#00B2FE', dash='dash')))
-    fig_historial.update_layout(title="Mercado en los Últimos 30 Días Hábiles", xaxis_title="Fecha", yaxis_title="Precio", template="plotly_dark")
-    st.plotly_chart(fig_historial, use_container_width=True)
 
-# ================= TAB 3: ARBITRAJE =================
-with tab_arbitraje:
-    st.subheader("⛓️ Red de Arbitraje Cruzado e Ineficiencias de Mercado")
-    moneda_puente = "EUR" if codigo_origen == "USD" or codigo_destino == "EUR" else "USD"
-    if moneda_puente in todas_las_tasas and codigo_destino in todas_las_tasas:
-        tasa_origen_puente = todas_las_tasas[moneda_puente]
-        tasa_puente_destino = todas_las_tasas[codigo_destino] / todas_las_tasas[moneda_puente]
-        monto_directo = cantidad_input * precio_actual
-        monto_triangulado = cantidad_input * tasa_origen_puente * tasa_puente_destino
-        diferencia = monto_triangulado - monto_directo
-        
-        st.markdown(f"**Ruta Evaluada:** `{codigo_origen}` ➔ `{moneda_puente}` ➔ `{codigo_destino}`")
-        t_col1, t_col2 = st.columns(2)
-        with t_col1:
-            st.info(f"💵 **Conversión Directa:** {monto_directo:.2f} {codigo_destino}")
-            st.success(f"🔀 **Conversión Cruzada:** {monto_triangulado:.2f} {codigo_destino}")
-        with t_col2:
-            if diferencia > 0.001:
-                st.metric(label="Arbitraje Detectado (Ganancia)", value=f"+{diferencia:.4f} {codigo_destino}")
-                st.balloons()
-            else:
-                st.metric(label="Divergencia de Precios Cruzados", value=f"{diferencia:.4f} {codigo_destino}")
-                st.caption("Los precios están en perfecto equilibrio macroeconómico.")
-
-# ================= TAB 4: PRUEBAS DE ESTRÉS =================
-with tab_stress:
-    st.subheader("💥 Simulación de Escenarios Macroeconómicos Extremos (Stress Testing)")
-    escenario = st.radio(
-        "Selecciona el Escenario de Crisis Global:",
-        ("Mercado Normal", "Shock Geopolítico (Volatilidad Extrema)", "Colapso Bancario (Desplome Exponencial)")
-    )
+# ==========================================
+# PESTAÑA 3: PRUEBAS DE ESTRÉS
+# ==========================================
+with tab3:
+    st.header("🚨 Simulación de Escenarios y Crisis Macroeconómicas")
+    st.write("Modificación controlada de los coeficientes de la ecuación diferencial para analizar comportamientos de la divisa ante impactos financieros extremos mundiales.")
     
-    if escenario == "Shock Geopolítico (Volatilidad Extrema)":
-        mu_stress, sigma_stress = 0.0, volatilidad * 4.0
-        explicacion_stress = "⚠️ **Diagnóstico de Estrés:** Incertidumbre geopolítica severa. Se congela el rendimiento esperado, pero el factor estocástico se multiplica por 4."
-    elif escenario == "Colapso Bancario (Desplome Exponencial)":
-        mu_stress, sigma_stress = -0.015, volatilidad * 2.5
-        explicacion_stress = "🚨 **Diagnóstico de Estrés:** Fuga masiva de activos y devaluación instantánea. La deriva calculada por la regresión de IA se desploma a niveles negativos drásticos."
-    else:
-        mu_stress, sigma_stress = mu_estimada_ia, volatilidad
-        explicacion_stress = "✅ Parámetros de mercado normales estimados por nuestro modelo de regresión de IA."
+    escenario = st.radio("Seleccione el Escenario a evaluar:", 
+                         ["Estable (Línea Base de la IA)", "Shock Geopolítico Global", "Colapso Estructural de la Moneda"])
+    
+    # Redefinición dinámica de variables EDO según el test
+    if escenario == "Estable (Línea Base de la IA)":
+        mu_stress = mu_calculada
+        sigma_stress = volatilidad
+        desc_escenario = "Mantiene los parámetros óptimos detectados mediante la regresión de aprendizaje predictivo."
+    elif escenario == "Shock Geopolítico Global":
+        mu_stress = 0.0000 
+        sigma_stress = volatilidad * 3.5
+        desc_escenario = "Simula parálisis comercial internacional masiva: La tendencia media se colapsa a cero, pero la volatilidad se multiplica drásticamente por 350%."
+    else: # Colapso Estructural
+        mu_stress = -0.025
+        sigma_stress = volatilidad * 1.8
+        desc_escenario = "Simula una fuga masiva de capitales de la región. La tasa de cambio decae exponencialmente de forma severa y continua."
         
-    horas_s = np.linspace(0, 24, 100)
-    dt_s = horas_s[1] - horas_s[0]
+    st.markdown(f"**Condición Operativa:** {desc_escenario}")
+    
+    # Ejecución de la EDO bajo condiciones críticas
+    solucion_stress = S_0 * np.exp(mu_stress * t_sim)
+    
     fig_stress = go.Figure()
-    
-    for _ in range(simulaciones):
-        camino_s = [precio_actual]
-        for t in range(1, len(horas_s)):
-            dW = np.random.normal(0, np.sqrt(dt_s))
-            nuevo_precio = camino_s[-1] * np.exp((mu_stress - 0.5 * sigma_stress**2) * dt_s + sigma_stress * dW)
-            camino_s.append(nuevo_precio)
-        fig_stress.add_trace(go.Scatter(x=horas_s, y=camino_s, mode='lines', line=dict(width=1), opacity=0.2, showlegend=False))
+    for i in range(caminos_simulados):
+        caminos_st = [S_0]
+        for t in range(T):
+            shock = np.random.normal(0, 1)
+            S_sig = caminos_st[-1] * (1 + mu_stress + sigma_stress * shock)
+            caminos_st.append(S_sig)
+        fig_stress.add_trace(go.Scatter(x=t_sim, y=caminos_st, mode='lines', line=dict(width=1), opacity=0.3, showlegend=False))
         
-    edo_stress = precio_actual * np.exp(mu_stress * horas_s)
-    fig_stress.add_trace(go.Scatter(x=horas_s, y=edo_stress, mode='lines', name='EDO Bajo Estrés', line=dict(color='#FF2B2B', width=4)))
-    fig_stress.update_layout(title=f"Comportamiento de la EDO bajo: {escenario}", xaxis_title="Horas Hacia el Futuro", yaxis_title="Precio", template="plotly_dark")
+    fig_stress.add_trace(go.Scatter(x=t_sim, y=solucion_stress, mode='lines', name='Trayectoria EDO en Crisis', line=dict(color='#FF0055', width=3)))
+    fig_stress.update_layout(xaxis_title="Tiempo (Horas)", yaxis_title="Precio de la Divisa", template="plotly_dark")
     st.plotly_chart(fig_stress, use_container_width=True)
-    st.markdown(explicacion_stress)
